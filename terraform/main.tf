@@ -28,50 +28,6 @@ provider "aws" {
   }
 }
 
-# IAM Role for Lambda
-resource "aws_iam_role" "lambda_role" {
-  name = "${var.app_name}-${var.environment}-lambda-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-      }
-    ]
-  })
-}
-
-# CloudWatch Log Group with retention (Best Practice)
-resource "aws_cloudwatch_log_group" "lambda_logs" {
-  name              = "/aws/lambda/${aws_lambda_function.hello_world.function_name}"
-  retention_in_days = 7 # Keep logs for 7 days to avoid infinite storage costs
-}
-
-# Attach minimal execution policy to Lambda role (Best Practice)
-resource "aws_iam_role_policy" "lambda_logging" {
-  name = "${var.app_name}-logging-policy"
-  role = aws_iam_role.lambda_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = [
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Effect   = "Allow"
-        Resource = "${aws_cloudwatch_log_group.lambda_logs.arn}:*"
-      }
-    ]
-  })
-}
-
 # Archive the app directory
 data "archive_file" "lambda_zip" {
   type        = "zip"
@@ -80,36 +36,15 @@ data "archive_file" "lambda_zip" {
   excludes    = ["__pycache__", ".pytest_cache"]
 }
 
-# Lambda Function
-resource "aws_lambda_function" "hello_world" {
-  filename         = data.archive_file.lambda_zip.output_path
-  function_name    = "${var.app_name}-${var.environment}"
-  role             = aws_iam_role.lambda_role.arn
-  handler          = "main.handler"
-  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
-  runtime          = "python3.11"
-  memory_size      = 128
-  timeout          = 10
+# Call the reusable Lambda module
+module "hello_world_lambda" {
+  source = "./modules/lambda"
 
-  environment {
-    variables = {
-      APP_NAME    = var.app_name
-      ENVIRONMENT = var.environment
-    }
-  }
-}
-
-# Lambda Function URL (Simplest way to get a URL)
-resource "aws_lambda_function_url" "hello_world_url" {
-  function_name      = aws_lambda_function.hello_world.function_name
-  authorization_type = "NONE"
-
-  cors {
-    allow_credentials = true
-    allow_origins     = ["*"]
-    allow_methods     = ["*"]
-    allow_headers     = ["date", "keep-alive"]
-    expose_headers    = ["keep-alive", "date"]
-    max_age           = 86400
-  }
+  app_name    = var.app_name
+  environment = var.environment
+  handler     = "main.handler"
+  runtime     = "python3.11"
+  source_path = data.archive_file.lambda_zip.output_path
+  source_hash = data.archive_file.lambda_zip.output_base64sha256
+  tags        = var.tags
 }
