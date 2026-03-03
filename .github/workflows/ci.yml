@@ -55,7 +55,8 @@ jobs:
   terraform-plan:
     name: Terraform Plan
     needs: test-and-lint
-    if: always() && (needs.test-and-lint.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.terraform_action == 'destroy'))
+    # Run if test-and-lint is success OR skipped (e.g. on destroy)
+    if: always() && (needs.test-and-lint.result == 'success' || needs.test-and-lint.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -99,8 +100,10 @@ jobs:
   terraform-deploy:
     name: Terraform ${{ inputs.terraform_action || 'apply' }}
     needs: terraform-plan
+    # Only run if plan was successful
+    if: needs.terraform-plan.result == 'success'
     runs-on: ubuntu-latest
-    environment: aws-deployment # This is the approval gate
+    environment: aws-deployment
     permissions:
       id-token: write
       contents: read
