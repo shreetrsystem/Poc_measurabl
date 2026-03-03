@@ -4,6 +4,14 @@ on:
     branches: ["main"]
   workflow_dispatch:
     inputs:
+      terraform_action:
+        description: "Action to perform (apply or destroy)"
+        required: true
+        type: choice
+        options:
+          - apply
+          - destroy
+        default: apply
       aws_region:
         description: "AWS region"
         required: false
@@ -11,9 +19,11 @@ on:
         default: "us-east-1"
 env:
   AWS_REGION: ${{ inputs.aws_region || 'us-east-1' }}
+  TERRAFORM_ACTION: ${{ inputs.terraform_action || 'apply' }}
 
 jobs:
   test-and-lint:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.terraform_action == 'apply')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -42,8 +52,10 @@ jobs:
           export PYTHONPATH=$PYTHONPATH:$(pwd)
           pytest
 
-  deploy:
+  terraform:
+    name: Terraform ${{ inputs.terraform_action || 'apply' }}
     needs: test-and-lint
+    if: always() && (needs.test-and-lint.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.terraform_action == 'destroy'))
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -75,6 +87,11 @@ jobs:
         working-directory: terraform
         run: terraform validate
 
-      - name: Terraform Apply
+      - name: Terraform Apply/Destroy
         working-directory: terraform
-        run: terraform apply -auto-approve -input=false -var="aws_region=${{ env.AWS_REGION }}"
+        run: |
+          if [ "${{ env.TERRAFORM_ACTION }}" == "destroy" ]; then
+            terraform destroy -auto-approve -input=false -var="aws_region=${{ env.AWS_REGION }}"
+          else
+            terraform apply -auto-approve -input=false -var="aws_region=${{ env.AWS_REGION }}"
+          fi
