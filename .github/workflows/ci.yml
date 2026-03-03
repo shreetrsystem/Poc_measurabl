@@ -100,8 +100,10 @@ jobs:
   terraform-deploy:
     name: Terraform ${{ inputs.terraform_action || 'apply' }}
     needs: terraform-plan
-    # Only run if plan was successful
-    if: needs.terraform-plan.result == 'success'
+    # Run if plan was successful, even if previous jobs were skipped
+    if: |
+      always() && 
+      needs.terraform-plan.result == 'success'
     runs-on: ubuntu-latest
     environment: aws-deployment
     permissions:
