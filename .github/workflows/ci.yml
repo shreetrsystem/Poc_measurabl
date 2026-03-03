@@ -1,0 +1,80 @@
+name: ci
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      aws_region:
+        description: "AWS region"
+        required: false
+        type: string
+        default: "us-east-1"
+env:
+  AWS_REGION: ${{ inputs.aws_region || 'us-east-1' }}
+
+jobs:
+  test-and-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Lint with flake8
+        run: |
+          # stop the build if there are Python syntax errors or undefined names
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+      - name: Run tests with pytest
+        run: |
+          export PYTHONPATH=$PYTHONPATH:$(pwd)
+          pytest
+
+  deploy:
+    needs: test-and-lint
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+
+      - name: Terraform Format check
+        working-directory: poc/terraform
+        run: terraform fmt -check
+
+      - name: Terraform Init
+        working-directory: poc/terraform
+        run: terraform init -input=false
+
+      - name: Terraform Validate
+        working-directory: poc/terraform
+        run: terraform validate
+
+      - name: Terraform Apply
+        working-directory: poc/terraform
+        run: terraform apply -auto-approve -input=false -var="aws_region=${{ env.AWS_REGION }}"
